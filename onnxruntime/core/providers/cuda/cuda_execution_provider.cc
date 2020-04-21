@@ -47,6 +47,29 @@ ONNX_OPERATOR_KERNEL_EX(
         .TypeConstraint("T", DataTypeImpl::AllFixedSizeTensorTypes()),
     Memcpy);
 
+// this is just MemcpyFromHost/MemcpyToHost with a different OpType for easier analysis
+ONNX_OPERATOR_KERNEL_EX(
+    SwapFromHost,
+    kOnnxDomain,
+    1,
+    kCudaExecutionProvider,
+    KernelDefBuilder()
+        .InputMemoryType<OrtMemTypeCPUInput>(0)
+        .ExecQueueId(kCudaStreamCopyIn)
+        .TypeConstraint("T", DataTypeImpl::AllTensorTypes()),
+    Memcpy);
+
+ONNX_OPERATOR_KERNEL_EX(
+    SwapToHost,
+    kOnnxDomain,
+    1,
+    kCudaExecutionProvider,
+    KernelDefBuilder()
+        .OutputMemoryType<OrtMemTypeCPUInput>(0)
+        .ExecQueueId(kCudaStreamCopyOut)
+        .TypeConstraint("T", DataTypeImpl::AllTensorTypes()),
+    Memcpy);
+
 }  // namespace cuda
 
 thread_local std::unique_ptr<CUDAExecutionProvider::PerThreadContextMap> CUDAExecutionProvider::per_thread_context_map_;
@@ -54,9 +77,9 @@ thread_local std::unique_ptr<CUDAExecutionProvider::PerThreadContextMap> CUDAExe
 CUDAExecutionProvider::PerThreadContext::PerThreadContext(OrtDevice::DeviceId device_id, size_t cuda_mem_limit, ArenaExtendStrategy arena_extend_strategy) {
   CUDA_CALL_THROW(cudaSetDevice(device_id));
   CUBLAS_CALL_THROW(cublasCreate(&cublas_handle_));
-  #if CUDA_VERSION >= 10010
+#if CUDA_VERSION >= 10010
   CUBLAS_CALL_THROW(cublasLtCreate(&cublasLt_handle_));
-  #endif
+#endif
   CUDNN_CALL_THROW(cudnnCreate(&cudnn_handle_));
   CURAND_CALL_THROW(curandCreateGenerator(&curand_generator_, CURAND_RNG_PSEUDO_DEFAULT));
 
@@ -262,6 +285,8 @@ namespace cuda {
 // opset 1 to 9
 class ONNX_OPERATOR_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 1, MemcpyFromHost);
 class ONNX_OPERATOR_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 1, MemcpyToHost);
+class ONNX_OPERATOR_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 1, SwapFromHost);
+class ONNX_OPERATOR_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 1, SwapToHost);
 class ONNX_OPERATOR_VERSIONED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 4, 10, Concat);
 class ONNX_OPERATOR_VERSIONED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 1, 10, Unsqueeze);
 class ONNX_OPERATOR_VERSIONED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 1, 8, Flatten);
@@ -770,6 +795,8 @@ static void RegisterCudaKernels(KernelRegistry& kernel_registry) {
   static const BuildKernelCreateInfoFn function_table[] = {
       BuildKernelCreateInfo<ONNX_OPERATOR_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 1, MemcpyFromHost)>,
       BuildKernelCreateInfo<ONNX_OPERATOR_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 1, MemcpyToHost)>,
+      BuildKernelCreateInfo<ONNX_OPERATOR_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 1, SwapFromHost)>,
+      BuildKernelCreateInfo<ONNX_OPERATOR_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 1, SwapToHost)>,
       BuildKernelCreateInfo<ONNX_OPERATOR_VERSIONED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 4, 10, Concat)>,
       BuildKernelCreateInfo<ONNX_OPERATOR_VERSIONED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 1, 10, Unsqueeze)>,
       BuildKernelCreateInfo<ONNX_OPERATOR_VERSIONED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 1, 8, Flatten)>,
