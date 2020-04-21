@@ -39,7 +39,7 @@ class IsAllFiniteOp final : public CudaKernel {
 
 template <typename T>
 struct IsAllFiniteFunctor {
-  void operator()(ChunkGroup<1> chunks, bool* output); 
+  void operator()(const cudaDeviceProp& prop, ChunkGroup<1> chunks, bool* output); 
 };
 
 }  // namespace cuda

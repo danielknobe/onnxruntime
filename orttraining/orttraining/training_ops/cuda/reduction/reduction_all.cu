@@ -46,16 +46,15 @@ __global__ void _MultiTensorReduceImpl(ChunkGroup<1> chunk_group, TOut* output) 
     }
   }
 
-  // Thread count in a block must be a multiple of 32.
-  constexpr int warp_size = 32;
+  // Thread count in a block must be a multiple of GPU_WARP_SIZE.
 #pragma unroll
-  for (int stride = warp_size / 2; stride > 0; stride /= 2) {
-    w_sum += __shfl_down_sync(0xFFFFFFFF, w_sum, stride);
+  for (int stride = GPU_WARP_SIZE / 2; stride > 0; stride /= 2) {
+    w_sum += WARP_SHFL_DOWN(w_sum, stride);
   }
 
-  const int warp_count_in_block = blockDim.x / warp_size;
-  const int lid = threadIdx.x % warp_size;
-  const int wid = threadIdx.x / warp_size;
+  const int warp_count_in_block = blockDim.x / GPU_WARP_SIZE;
+  const int lid = threadIdx.x % GPU_WARP_SIZE;
+  const int wid = threadIdx.x / GPU_WARP_SIZE;
 
   // Shape is 2 x warp_count_in_block.
   extern __shared__ unsigned char shared_memory_[];
@@ -81,11 +80,13 @@ __global__ void _MultiTensorReduceImpl(ChunkGroup<1> chunk_group, TOut* output) 
 };
 
 template <typename TIn, typename TOut, typename TBuf, typename TInOp, typename TOutOp>
-void MultiTensorReduce(ChunkGroup<1> chunk_group, TOut* output) {
+void MultiTensorReduce(const cudaDeviceProp& prop, ChunkGroup<1> chunk_group, TOut* output) {
   // thread count per block.
   constexpr int thread_count = ChunkGroup<1>::thread_count_per_block;
   // warp size of GPU.
-  constexpr int warp_size = 32;
+  const int warp_size = prop.warpSize;
+  ORT_ENFORCE(warp_size == GPU_WARP_SIZE);
+
   // shared memory's size per block.
   const int shared_memory_size = thread_count / warp_size * sizeof(TBuf);
 
@@ -97,13 +98,13 @@ void MultiTensorReduce(ChunkGroup<1> chunk_group, TOut* output) {
 }
 
 template <typename TIn, typename TOut>
-void MultiTensorReduceL2<TIn, TOut>::operator()(ChunkGroup<1> chunk_group, TOut* output) {
+void MultiTensorReduceL2<TIn, TOut>::operator()(const cudaDeviceProp& prop, ChunkGroup<1> chunk_group, TOut* output) {
   typedef typename ToBuffer<TIn>::Type TBuf;
-  MultiTensorReduce<TIn, TOut, TBuf, Square<TBuf, TIn>, Cast<TOut, TBuf>>(chunk_group, output);
+  MultiTensorReduce<TIn, TOut, TBuf, Square<TBuf, TIn>, Cast<TOut, TBuf>>(prop, chunk_group, output);
 }
 
 #define INSTANTIATE_MULTI_TENSOR_REDUCTION_L2_FUNCTOR(TIn, TOut) \
-  template void MultiTensorReduceL2<TIn, TOut>::operator()(ChunkGroup<1> chunk_group, TOut* output);
+  template void MultiTensorReduceL2<TIn, TOut>::operator()(const cudaDeviceProp& prop, ChunkGroup<1> chunk_group, TOut* output);
 
 INSTANTIATE_MULTI_TENSOR_REDUCTION_L2_FUNCTOR(double, float)
 INSTANTIATE_MULTI_TENSOR_REDUCTION_L2_FUNCTOR(float, float)

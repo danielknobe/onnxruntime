@@ -53,7 +53,7 @@ __global__ void IsAllFiniteMultiTensorImpl(ChunkGroup<1> chunks, bool* output) {
 }
 
 template <typename T>
-void IsAllFiniteFunctor<T>::operator()(ChunkGroup<1> chunks, bool* output) {
+void IsAllFiniteFunctor<T>::operator()(const cudaDeviceProp& prop, ChunkGroup<1> chunks, bool* output) {
   // One thread loads PARALLEL_LOADS elements.
   const int block_count = chunks.chunk_count;
   const int thread_count = ChunkGroup<1>::thread_count_per_block;
@@ -61,7 +61,7 @@ void IsAllFiniteFunctor<T>::operator()(ChunkGroup<1> chunks, bool* output) {
 }
 
 #define INSTANTIATE_ISALLFINITE_FUNCTOR(T) \
-  template void IsAllFiniteFunctor<T>::operator()(ChunkGroup<1> chunks, bool* output);
+  template void IsAllFiniteFunctor<T>::operator()(const cudaDeviceProp& prop, ChunkGroup<1> chunks, bool* output);
 
 INSTANTIATE_ISALLFINITE_FUNCTOR(half)
 INSTANTIATE_ISALLFINITE_FUNCTOR(float)

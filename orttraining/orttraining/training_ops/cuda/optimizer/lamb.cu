@@ -334,6 +334,7 @@ __global__ void LambMultiTensorComputeDirectionImpl(
 
 template <typename T1, typename T2, typename T3, typename T_GRAD_NORM>
 void LambMultiTensorComputeDirectionFunctor<T1, T2, T3, T_GRAD_NORM>::operator()(
+    const cudaDeviceProp& prop,
     ChunkGroup<6> chunk_group,
     const T1* loss_scale,
     const T_GRAD_NORM* g_norm,
@@ -360,6 +361,7 @@ void LambMultiTensorComputeDirectionFunctor<T1, T2, T3, T_GRAD_NORM>::operator()
 
 #define INSTANTIATE_LAMB_STAGE1_MULTI_TENSOR_FUNCTOR(T1, T2, T3, T_GRAD_NORM)   \
   template void LambMultiTensorComputeDirectionFunctor<T1, T2, T3, T_GRAD_NORM>::operator()( \
+      const cudaDeviceProp& prop,                                               \
       ChunkGroup<6> chunk_group,                                                \
       const T1* loss_scale,                                                     \
       const T_GRAD_NORM* g_norm,                                                \
@@ -413,6 +415,7 @@ __global__ void LambMultiTensorUpdateImpl(
 
 template <typename T1, typename T2, typename T3>
 void LambMultiTensorUpdateFunctor<T1, T2, T3>::operator()(
+    const cudaDeviceProp& prop,
     ChunkGroup<7> chunk_group,
     const T1* eta,
     const float ratio_min,
@@ -429,6 +432,7 @@ void LambMultiTensorUpdateFunctor<T1, T2, T3>::operator()(
 
 #define INSTANTIATE_LAMB_MULTI_TENSOR_UPDATE_FUNCTOR(T1, T2, T3)      \
   template void LambMultiTensorUpdateFunctor<T1, T2, T3>::operator()( \
+      const cudaDeviceProp& prop,                                     \
       ChunkGroup<7> chunk_group,                                      \
       const T1* eta,                                                  \
       const float ratio_min,                                          \
@@ -467,17 +471,16 @@ __global__ void LambMultiTensorReductionImpl(ChunkGroup<4> chunk_group) {
     }
   }
 
-  // Thread count in a block must be a multiple of 32.
-  constexpr int warp_size = 32;
+  // Thread count in a block must be a multiple of GPU_WARP_SIZE.
 #pragma unroll
-  for (int stride = warp_size / 2; stride > 0; stride /= 2) {
-    w_sum += __shfl_down_sync(0xFFFFFFFF, w_sum, stride);
-    d_sum += __shfl_down_sync(0xFFFFFFFF, d_sum, stride);
+  for (int stride = GPU_WARP_SIZE / 2; stride > 0; stride /= 2) {
+    w_sum += WARP_SHFL_DOWN(w_sum, stride);
+    d_sum += WARP_SHFL_DOWN(d_sum, stride);
   }
 
-  const int warp_count_in_block = blockDim.x / warp_size;
-  const int lid = threadIdx.x % warp_size;
-  const int wid = threadIdx.x / warp_size;
+  const int warp_count_in_block = blockDim.x / GPU_WARP_SIZE;
+  const int lid = threadIdx.x % GPU_WARP_SIZE;
+  const int wid = threadIdx.x / GPU_WARP_SIZE;
 
   // Shape is 2 x warp_count_in_block.
   extern __shared__ unsigned char shared_memory_[];
@@ -508,11 +511,13 @@ __global__ void LambMultiTensorReductionImpl(ChunkGroup<4> chunk_group) {
 };
 
 template <typename TIn1, typename TIn2, typename TOut1, typename TOut2, typename TBuf>
-void LambMultiTensorReductionFunctor<TIn1, TIn2, TOut1, TOut2, TBuf>::operator()(ChunkGroup<4> chunk_group) {
+void LambMultiTensorReductionFunctor<TIn1, TIn2, TOut1, TOut2, TBuf>::operator()(const cudaDeviceProp& prop, ChunkGroup<4> chunk_group) {
   // thread count per block.
   constexpr int thread_count = ChunkGroup<4>::thread_count_per_block;
   // warp size of GPU.
-  constexpr int warp_size = 32;
+  const int warp_size = prop.warpSize;
+  ORT_ENFORCE(warp_size == GPU_WARP_SIZE);
+
   // shared memory's size per block.
   const int shared_memory_size = thread_count / warp_size * 2 * sizeof(TBuf);
 
@@ -524,7 +529,7 @@ void LambMultiTensorReductionFunctor<TIn1, TIn2, TOut1, TOut2, TBuf>::operator()
 }
 
 #define INSTANTIATE_LAMB_MULTI_TENSOR_REDUCTION_FUNCTOR(TIn1, TIn2, TOut1, TOut2, TBuf) \
-  template void LambMultiTensorReductionFunctor<TIn1, TIn2, TOut1, TOut2, TBuf>::operator()(ChunkGroup<4> chunk_group);
+  template void LambMultiTensorReductionFunctor<TIn1, TIn2, TOut1, TOut2, TBuf>::operator()(const cudaDeviceProp& prop, ChunkGroup<4> chunk_group);
 
 INSTANTIATE_LAMB_MULTI_TENSOR_REDUCTION_FUNCTOR(float, float, float, float, float)
 INSTANTIATE_LAMB_MULTI_TENSOR_REDUCTION_FUNCTOR(double, double, double, double, double)

@@ -11,8 +11,6 @@
 namespace onnxruntime {
 namespace cuda {
 
-static constexpr int WARP_SIZE = 32;
-
 template <typename T>
 __global__ void _Iota(
     cub::CountingInputIterator<T> input,
@@ -47,7 +45,7 @@ __global__ void _GatherGradImpl(
 
 #pragma unroll
         for (int ii = 0; ii < SZ; ii++) {
-          int feature_dim = start_feature + ii * WARP_SIZE;
+          int feature_dim = start_feature + ii * GPU_WARP_SIZE;
           if (feature_dim < stride) {
             gradient[ii] = static_cast<T>(grad_output[grad_row + feature_dim]);
             weight[ii] = static_cast<T>(grad_weight[weight_row + feature_dim]);
@@ -61,7 +59,7 @@ __global__ void _GatherGradImpl(
 
 #pragma unroll
         for (int ii = 0; ii < SZ; ii++) {
-          int feature_dim = start_feature + ii * WARP_SIZE;
+          int feature_dim = start_feature + ii * GPU_WARP_SIZE;
           if (feature_dim < stride) {
             grad_weight[weight_row + feature_dim] = static_cast<T>(weight[ii]);
           }
@@ -74,6 +72,7 @@ __global__ void _GatherGradImpl(
 
 template <typename T, typename Tin>
 void GatherGradImpl(
+    const cudaDeviceProp& prop,
     const CudaKernel& cuda_kernel,
     const T* grad_data,
     const Tin* indices_data,
@@ -114,8 +113,11 @@ void GatherGradImpl(
       original_indices.get(), original_indices_sorted.get(),
       num_indices));
 
+  const int warp_size = prop.warpSize;
+  ORT_ENFORCE(warp_size == GPU_WARP_SIZE);
+
+  dim3 block(warp_size, 4);
   dim3 grid(CeilDiv(num_indices, 4), CeilDiv(stride, 128));
-  dim3 block(WARP_SIZE, 4);
 
   _GatherGradImpl<<<grid, block>>>(
       indices_data_sorted.get(),
@@ -130,6 +132,7 @@ void GatherGradImpl(
 
 #define SPECIALIZED_GRAD_IMPL2(T)           \
   template void GatherGradImpl<T, int64_t>( \
+      const cudaDeviceProp& prop,           \
       const CudaKernel& cuda_kernel,        \
       const T* grad_data,                   \
       const int64_t* indices_data,          \
@@ -140,6 +143,7 @@ void GatherGradImpl(
       const int64_t num_inputs,             \
       const int64_t param_itrs);            \
   template void GatherGradImpl<T, int32_t>( \
+      const cudaDeviceProp& prop,           \
       const CudaKernel& cuda_kernel,        \
       const T* grad_data,                   \
       const int32_t* indices_data,          \

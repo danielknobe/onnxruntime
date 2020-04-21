@@ -120,7 +120,7 @@ Status ReduceKernel<allow_multi_axes>::ReduceKernelShared(
       is_matrix_row_reduction(cudnn_reduce_op,
                               static_cast<int>(reduction_size),
                               static_cast<int>(stride), rank, axes_)) {
-    reduce_matrix_rows(
+    reduce_matrix_rows(GetDeviceProp(),
         reinterpret_cast<const CudaT*>(X),
         reinterpret_cast<CudaT*>(Y),
         static_cast<int>(reduction_size),
@@ -434,7 +434,7 @@ Status ReduceKernel<allow_multi_axes>::ComputeImpl(OpKernelContext* ctx, cudnnRe
         is_matrix_row_reduction(cudnn_reduce_op,
                                 static_cast<int>(reduction_size),
                                 static_cast<int>(stride), rank, axes_)) {
-      reduce_matrix_rows(
+      reduce_matrix_rows(GetDeviceProp(),
           reinterpret_cast<const CudaT*>(X->template Data<T>()),
           reinterpret_cast<CudaT*>(Y->template MutableData<T>()),
           static_cast<int>(reduction_size),

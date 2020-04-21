@@ -99,7 +99,7 @@ __global__ void reduce_all_kernel(const int size, const TIn * data, TOut* output
   TOut value_ = value;
 #pragma unroll
   for (int stride = NUM_THREADS_PER_WARP / 2; stride > 0; stride /= 2) {
-    value_ += __shfl_down_sync(ALL_ONE_MASK, value_, stride);
+    value_ += WARP_SHFL_DOWN(value_, stride);
   }
 
   // Return early if only one warp is used for reduction.
@@ -363,11 +363,13 @@ __global__ void reduce_matrix_rows_kernel(const TIn *input, TOut *output, int m,
 // For example, [N, C, H, W]-tensor may lead to a output [W]-tensor.
 // It's implementation is in reduction_ops.cu and called in reduction_ops.cc.
 template<typename TIn, typename TOut, typename TBuf>
-void call_reduce_matrix_rows(const TIn *input, TOut *output, int m, int n) {
+void call_reduce_matrix_rows(const cudaDeviceProp& prop, const TIn *input, TOut *output, int m, int n) {
   constexpr int max_num_threads_in_block = 512;
   constexpr int max_num_blocks_in_grid = 512;
-  constexpr int warp_size = 32;
   constexpr int load_count_per_thread = 4;
+
+  const int warp_size = prop.warpSize;
+  ORT_ENFORCE(warp_size == GPU_WARP_SIZE);
 
   const int block_x_dim = least_pow2_bound(std::max(1, std::min(n, warp_size)));
   const int block_y_dim = least_pow2_bound(std::max(1, std::min(max_num_threads_in_block / block_x_dim, m / load_count_per_thread)));
@@ -382,20 +384,20 @@ void call_reduce_matrix_rows(const TIn *input, TOut *output, int m, int n) {
 }
 
 template<typename TIn, typename TOut>
-void reduce_matrix_rows(const TIn* data, TOut* output, int m, int n)
+void reduce_matrix_rows(const cudaDeviceProp& prop, const TIn* data, TOut* output, int m, int n)
 {
-  call_reduce_matrix_rows<TIn, TOut, TOut>(data, output, m, n);
+  call_reduce_matrix_rows<TIn, TOut, TOut>(prop, data, output, m, n);
 }
 
-template<> void reduce_matrix_rows<half, half>(const half* data, half* output, int m, int n)
+template<> void reduce_matrix_rows<half, half>(const cudaDeviceProp& prop, const half* data, half* output, int m, int n)
 {
-  call_reduce_matrix_rows<half, half, float>(data, output, m, n);
+  call_reduce_matrix_rows<half, half, float>(prop, data, output, m, n);
 }
 
 template void reduce_matrix_rows<float, float>(
-  const float* data, float* output, int m, int n);
+  const cudaDeviceProp& prop, const float* data, float* output, int m, int n);
 template void reduce_matrix_rows<double, double>(
-  const double* data, double* output, int m, int n);
+  const cudaDeviceProp& prop, const double* data, double* output, int m, int n);
 
 }  // namespace cuda
 }  // namespace onnxruntime

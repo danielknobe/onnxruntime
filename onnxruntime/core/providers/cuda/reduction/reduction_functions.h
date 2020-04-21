@@ -30,7 +30,7 @@ bool is_matrix_row_reduction(
     std::vector<int64_t> axes);
 
 template <typename TIn, typename TOut>
-void reduce_matrix_rows(const TIn* data, TOut* output, int m, int n);
+void reduce_matrix_rows(const cudaDeviceProp& prop, const TIn* data, TOut* output, int m, int n);
 
 }  // namespace cuda
 }  // namespace onnxruntime

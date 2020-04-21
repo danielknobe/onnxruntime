@@ -26,6 +26,7 @@ ONNX_OPERATOR_KERNEL_EX(
 namespace {
 template <typename T, typename Tin>
 Status CallGatherGradImpl(
+    const cudaDeviceProp& prop,
     const CudaKernel& cuda_kernel,
     int64_t num_weights, int64_t stride, int64_t num_inputs, int64_t param_itrs,
     const Tensor& grad, const Tensor& indices,
@@ -37,6 +38,7 @@ Status CallGatherGradImpl(
   const Tin* indices_data = indices.template Data<Tin>();
 
   GatherGradImpl(
+      prop,
       cuda_kernel,
       reinterpret_cast<const CudaT*>(grad_data),
       indices_data,
@@ -52,6 +54,7 @@ Status CallGatherGradImpl(
 
 template <typename T>
 Status DispatchToGatherGradImplByTin(
+    const cudaDeviceProp& prop,
     MLDataType tin_data_type,
     const CudaKernel& cuda_kernel,
     int64_t num_weights, int64_t stride, int64_t num_inputs, int64_t param_itrs,
@@ -59,16 +62,17 @@ Status DispatchToGatherGradImplByTin(
     Tensor& output) {
   if (utils::IsPrimitiveDataType<int32_t>(tin_data_type)) {
     return CallGatherGradImpl<T, int32_t>(
-        cuda_kernel, num_weights, stride, num_inputs, param_itrs, grad, indices, output);
+        prop, cuda_kernel, num_weights, stride, num_inputs, param_itrs, grad, indices, output);
   } else if (utils::IsPrimitiveDataType<int64_t>(tin_data_type)) {
     return CallGatherGradImpl<T, int64_t>(
-        cuda_kernel, num_weights, stride, num_inputs, param_itrs, grad, indices, output);
+        prop, cuda_kernel, num_weights, stride, num_inputs, param_itrs, grad, indices, output);
   }
 
   return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "GatherGrad unsupported Tin type: ", tin_data_type);
 }
 
 Status DispatchToGatherGradImpl(
+    const cudaDeviceProp& prop,
     MLDataType t_data_type, MLDataType tin_data_type,
     const CudaKernel& cuda_kernel,
     int64_t num_weights, int64_t stride, int64_t num_inputs, int64_t param_itrs,
@@ -76,12 +80,12 @@ Status DispatchToGatherGradImpl(
     Tensor& output) {
   if (utils::IsPrimitiveDataType<float>(t_data_type)) {
     return DispatchToGatherGradImplByTin<float>(
-        tin_data_type, cuda_kernel, num_weights, stride, num_inputs, param_itrs, grad, indices, output);
+        prop, tin_data_type, cuda_kernel, num_weights, stride, num_inputs, param_itrs, grad, indices, output);
   }
 #if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ >= 700
   else if (utils::IsPrimitiveDataType<MLFloat16>(t_data_type)) {
     return DispatchToGatherGradImplByTin<MLFloat16>(
-        tin_data_type, cuda_kernel, num_weights, stride, num_inputs, param_itrs, grad, indices, output);
+        prop, tin_data_type, cuda_kernel, num_weights, stride, num_inputs, param_itrs, grad, indices, output);
   }
 #endif
 
@@ -107,6 +111,7 @@ Status GatherGrad::ComputeInternal(OpKernelContext* context) const {
   const int64_t param_itrs = data_shape.SizeFromDimension(0) / num_inputs;
 
   return DispatchToGatherGradImpl(
+      GetDeviceProp(),
       T_type, Tin_type, *this,
       num_weights, stride, num_inputs, param_itrs,
       *grad, *indices, *output);

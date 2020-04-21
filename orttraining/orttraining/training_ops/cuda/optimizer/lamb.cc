@@ -163,6 +163,7 @@ Status copy_inputs_to_outputs(
 
 template <typename CudaT2, typename CudaT3, typename CudaT4, typename CudaT_GRAD_NORM>
 Status launch_lamb_compute_direction(
+    const cudaDeviceProp& prop,
     const int64_t update_count,
     const int group_count,
     const CudaT2* p_loss_scale,
@@ -256,6 +257,7 @@ Status launch_lamb_compute_direction(
     LambStage1 lamb_stage1;
 
     launch_multi_tensor_functor<tensor_count_per_group, LambStage1, const CudaT2*, const CudaT_GRAD_NORM*, float, float, float, float>(
+        prop,
         2048 * 32,
         tensor_sizes_in_buckets[key],
         buckets[key],
@@ -268,6 +270,7 @@ Status launch_lamb_compute_direction(
 
 template <typename CudaTNorm, typename CudaTIn1, typename CudaTIn2>
 Status launch_lamb_reduction(
+    const cudaDeviceProp& prop,
     const int group_count,
     std::vector<int>& tensor_sizes,
     std::vector<CudaTNorm*>& p_w_norms,
@@ -327,6 +330,7 @@ Status launch_lamb_reduction(
     typedef LambMultiTensorReductionFunctor<CudaTIn1, CudaTIn2, CudaTNorm, CudaTNorm, CudaTNorm> TReducer;
     TReducer reducer;
     launch_multi_tensor_functor<tensor_count_per_group, TReducer>(
+        prop,
         2048 * 32,
         tensor_sizes_in_buckets,
         buckets,
@@ -338,6 +342,7 @@ Status launch_lamb_reduction(
 
 template <typename CudaT1, typename CudaT2, typename CudaT3>
 Status launch_lamb_update(
+    const cudaDeviceProp& prop,
     const int group_count,
     const CudaT1* eta,
     const float ratio_min,
@@ -412,6 +417,7 @@ Status launch_lamb_update(
     launch_multi_tensor_functor<
       tensor_count_per_group, LambStage2,
       const CudaT1*, const float, const float>(
+        prop,
         2048 * 32,
         tensor_sizes_in_bucket,
         buckets,
@@ -627,6 +633,7 @@ Status LambOptimizer<T1, T2, T3, T4, T_GRAD_NORM>::ComputeInternal(OpKernelConte
 
 
   launch_lamb_compute_direction(
+      GetDeviceProp(),
       step_data ? *step_data : 0,
       group_count,
       loss_scale_data,
@@ -639,6 +646,7 @@ Status LambOptimizer<T1, T2, T3, T4, T_GRAD_NORM>::ComputeInternal(OpKernelConte
       do_bias_correction_);
 
   launch_lamb_reduction(
+      GetDeviceProp(),
       group_count,
       tensor_sizes,
       p_w_norms,
@@ -648,6 +656,7 @@ Status LambOptimizer<T1, T2, T3, T4, T_GRAD_NORM>::ComputeInternal(OpKernelConte
       reduction_data);
 
   launch_lamb_update(
+      GetDeviceProp(),
       group_count,
       eta_data,
       ratio_min_,

@@ -101,6 +101,7 @@ void LambUpdate(
 template <typename T1, typename T2, typename T3, typename T_GRAD_NORM>
 struct LambMultiTensorComputeDirectionFunctor {
   void operator()(
+      const cudaDeviceProp& prop,
       ChunkGroup<6> chunk_group,
       const T1* loss_scale,
       const T_GRAD_NORM* grad_norm,
@@ -127,7 +128,7 @@ struct LambMultiTensorComputeDirectionFunctor {
 //  d_norm: chunk_group.tensor_ptrs[3][i]
 template <typename TIn1, typename TIn2, typename TOut1, typename TOut2, typename TBuf>
 struct LambMultiTensorReductionFunctor {
-  void operator()(ChunkGroup<4> chunk_group);
+  void operator()(const cudaDeviceProp& prop, ChunkGroup<4> chunk_group);
 };
 
 // Lamb's stage 2 maps [w_norm, w_norm, w, d] to [w_new, g_new, w_fp16_new] where
@@ -152,6 +153,7 @@ struct LambMultiTensorReductionFunctor {
 template <typename T1, typename T2, typename T3>
 struct LambMultiTensorUpdateFunctor {
   void operator()(
+      const cudaDeviceProp& prop,
       ChunkGroup<7> chunk_group,
       const T1* eta,
       const float ratio_min,

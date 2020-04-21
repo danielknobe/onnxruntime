@@ -11,6 +11,7 @@ namespace cuda {
 
 template <typename T, typename Tin>
 void GatherGradImpl(
+    const cudaDeviceProp& prop,
     const CudaKernel& cuda_kernel,
     const T* grad_data,
     const Tin* indices_data,
