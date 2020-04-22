@@ -28,9 +28,6 @@ class MemorySwapRewriter : public RewriteRule {
 
   Status Apply(Graph& graph, Node& node, RewriteRuleEffect& rule_effect, const logging::Logger& logger) const override;
 
-  bool ShouldHandleSrcNode(const Node& node) const;
-  bool ShouldHandleDstNode(const Node& node) const;
-
   int min_topo_distance_;
 };
 

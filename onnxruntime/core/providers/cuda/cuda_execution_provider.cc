@@ -47,14 +47,15 @@ ONNX_OPERATOR_KERNEL_EX(
         .TypeConstraint("T", DataTypeImpl::AllFixedSizeTensorTypes()),
     Memcpy);
 
-// this is just MemcpyFromHost/MemcpyToHost with a different OpType for easier analysis
+// this is similar to MemcpyFromHost/MemcpyToHost
+// but with different OpTypes and CPU memory type for cudaMemcpyAsync
 ONNX_OPERATOR_KERNEL_EX(
     SwapFromHost,
     kOnnxDomain,
     1,
     kCudaExecutionProvider,
     KernelDefBuilder()
-        .InputMemoryType<OrtMemTypeCPUInput>(0)
+        .InputMemoryType<OrtMemTypeCPU>(0)
         .ExecQueueId(kCudaStreamCopyIn)
         .TypeConstraint("T", DataTypeImpl::AllTensorTypes()),
     Memcpy);
@@ -65,7 +66,7 @@ ONNX_OPERATOR_KERNEL_EX(
     1,
     kCudaExecutionProvider,
     KernelDefBuilder()
-        .OutputMemoryType<OrtMemTypeCPUInput>(0)
+        .OutputMemoryType<OrtMemTypeCPU>(0)
         .ExecQueueId(kCudaStreamCopyOut)
         .TypeConstraint("T", DataTypeImpl::AllTensorTypes()),
     Memcpy);

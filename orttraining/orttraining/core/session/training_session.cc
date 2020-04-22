@@ -109,6 +109,37 @@ Status SetupOptimizerParams(
 bool IsRootNode(const TrainingSession::TrainingConfiguration& config) {
   return config.distributed_config.world_rank == 0;
 }
+
+void DumpAfterAddControlEdge(const Graph& graph) {
+  GraphViewer gv(graph);
+  for (auto i : gv.GetNodesInTopologicalOrder()) {
+    const auto& node = *gv.GetNode(i);
+    std::cout << node.Name() << "(" << node.OpType() << ")"
+              << ": " << node.OutputDefs()[0]->Name() << " [";
+    const auto* shape_proto = node.OutputDefs()[0]->Shape();
+    if (shape_proto) {
+      for (auto dim : shape_proto->dim()) {
+        if (dim.has_dim_value())
+          std::cout << dim.dim_value();
+        else if (dim.has_dim_param())
+          std::cout << dim.dim_param();
+        else
+          std::cout << "?";
+
+        std::cout << ",";
+      }
+    } else {
+      std::cout << "*";
+    }
+    std::cout << "], Output/control to {";
+    for (auto out_iter = node.OutputNodesBegin(); out_iter != node.OutputNodesEnd(); ++out_iter) {
+      std::cout << out_iter->Name() << ":" << out_iter->OutputDefs()[0]->Name() << ", ";
+    }
+    std::cout << "}" << std::endl;
+  }
+  std::cout << std::endl;
+}
+
 }  // namespace
 
 Status TrainingSession::Initialize() {
@@ -116,7 +147,13 @@ Status TrainingSession::Initialize() {
   auto transformer = onnxruntime::make_unique<RuleBasedGraphTransformer>("RuleAddControlEdgesForMemSwapTransformer");
   ORT_RETURN_IF_ERROR(transformer->Register(onnxruntime::make_unique<AddControlEdgeForMemorySwapRewriter>()));
   ORT_RETURN_IF_ERROR(RegisterGraphTransformer(std::unique_ptr<GraphTransformer>(transformer.release()), TransformerLevel::Level3));
-  return InferenceSession::Initialize();
+  Status st = InferenceSession::Initialize();
+
+#if 0
+  std::cout << "Topo order after AddControlEdges:" << std::endl;
+  DumpAfterAddControlEdge(model_->MainGraph());
+#endif
+  return st;
 }
 
 Status TrainingSession::ConfigureForTraining(
@@ -476,32 +513,7 @@ Status TrainingSession::AddMemorySwap(int min_topo_distance) {
 
 #if 0
   std::cout << "Topo order after memory swap:" << std::endl;
-  GraphViewer gv(graph);
-  for (auto i : gv.GetNodesInTopologicalOrder()) {
-    const auto& node = *gv.GetNode(i);
-    std::cout << node.Name() << ": " << node.OutputDefs()[0]->Name() << " [";
-    const auto* shape_proto = node.OutputDefs()[0]->Shape();
-    if (shape_proto) {
-      for (auto dim : shape_proto->dim()) {
-        if (dim.has_dim_value())
-          std::cout << dim.dim_value();
-        else if (dim.has_dim_param())
-          std::cout << dim.dim_param();
-        else
-          std::cout << "?";
-
-        std::cout << ",";
-      }
-    } else {
-      std::cout << "*";
-    }
-    std::cout << "], Output/control to {";
-    for (auto out_iter = node.OutputNodesBegin(); out_iter != node.OutputNodesEnd(); ++out_iter) {
-      std::cout << out_iter->Name() << ":" << out_iter->OutputDefs()[0]->Name() << ", ";
-    }
-    std::cout << "}" << std::endl;
-  }
-  std::cout << std::endl;
+  DumpAfterAddControlEdge(graph);
 #endif
 
   return Status::OK();

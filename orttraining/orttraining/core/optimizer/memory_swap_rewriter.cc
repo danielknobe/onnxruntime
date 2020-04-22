@@ -22,29 +22,31 @@ static void ComputeTopoIndices(const Graph& graph, std::unordered_map<NodeIndex,
   }
 }
 
-bool MemorySwapRewriter::ShouldHandleSrcNode(const Node& node) const {
+static bool ShouldHandleSrcNode(const Node& node) {
   // blacklist some ops for memory swap
   // TODO: make it configurable
   static const std::unordered_set<std::string> ignore_src_op_types =
       {"Shape",
        "Reshape",
-       "Transpose"};
+       "Transpose",
+       "Cast"};
   return !IsBackwardNode(node) && 0 == ignore_src_op_types.count(node.OpType());
 }
 
-bool MemorySwapRewriter::ShouldHandleDstNode(const Node& node) const {
-  // blacklist some ops for memory swap
-  // TODO: make it configurable
-  static const std::unordered_set<std::string> ignore_dst_op_types =
-      {"ReluGrad",  // CPU only
-       "Shape"};
-  return IsBackwardNode(node) && 0 == ignore_dst_op_types.count(node.OpType());
+static bool ShouldHandleDstNode(const Node& node, int dst_arg_idx) {
+  // whitelist ops and arg_idx for memory swap
+  static const std::unordered_map<std::string, std::unordered_set<int>> allowed_dst_op_args =
+      {{"Reshape", {0}},
+       {"Gemm", {0, 1}}};
+  return IsBackwardNode(node) &&
+         allowed_dst_op_args.count(node.OpType()) &&
+         allowed_dst_op_args.at(node.OpType()).count(dst_arg_idx);
 }
 
 Status MemorySwapRewriter::Apply(Graph& graph, Node& src_node, RewriteRuleEffect& rule_effect, const logging::Logger& /*logger*/) const {
   std::unordered_set<int> to_bw_arg_idx;
   for (auto edge_iter = src_node.OutputEdgesBegin(); edge_iter != src_node.OutputEdgesEnd(); ++edge_iter) {
-    if (ShouldHandleDstNode(edge_iter->GetNode())) {
+    if (ShouldHandleDstNode(edge_iter->GetNode(), edge_iter->GetDstArgIndex())) {
       to_bw_arg_idx.insert(edge_iter->GetSrcArgIndex());
     }
   }
@@ -71,7 +73,7 @@ Status MemorySwapRewriter::Apply(Graph& graph, Node& src_node, RewriteRuleEffect
       if (output_edge.GetSrcArgIndex() != src_node_output_idx)
         continue;
 
-      if (!ShouldHandleDstNode(output_edge.GetNode()))
+      if (!ShouldHandleDstNode(output_edge.GetNode(), output_edge.GetDstArgIndex()))
         continue;
 
       const Node& dst_node = output_edge.GetNode();
@@ -105,7 +107,7 @@ bool MemorySwapRewriter::SatisfyCondition(const Graph& graph, const Node& node, 
   // check if the node has one output going to a backward
   int fw_topo_idx = topo_indices[node.Index()];
   for (auto iter = node.OutputEdgesBegin(); iter != node.OutputEdgesEnd(); ++iter) {
-    if (ShouldHandleDstNode(iter->GetNode())) {
+    if (ShouldHandleDstNode(iter->GetNode(), iter->GetDstArgIndex())) {
       int bw_topo_idx = topo_indices[iter->GetNode().Index()];
       if (bw_topo_idx - fw_topo_idx > min_topo_distance_)
         return true;

@@ -463,7 +463,6 @@ Status ExecutionFrame::AllocateAsPerAllocationPlan(OrtValue& ort_value, int ort_
         OrtValue& reuse_value = GetMutableMLValue(reuse_mlvalue_index);
         if (!reuse_value.IsAllocated()) {
           ORT_RETURN_IF_ERROR(AllocateAsPerAllocationPlan(reuse_value, reuse_mlvalue_index, shape, nnz));
-          std::cout << "(" << ort_value_index << "): reused (alloc) " << reuse_mlvalue_index << std::endl;
         }
         ORT_RETURN_IF_ERROR(AllocateMLValueTensorPreAllocateBuffer(
             ort_value, reuse_mlvalue_index, ml_data_type, alloc_info, *shape, per_alloc_plan.create_fence));
@@ -477,15 +476,25 @@ Status ExecutionFrame::AllocateAsPerAllocationPlan(OrtValue& ort_value, int ort_
       }
       case AllocKind::kGroupAllocate: {
         // Async buffers with fence would be added to tail of its group queue
+        bool async_buffer_reused = false;
         auto* queue = FindQueueForGroupedAsyncBuffers(per_alloc_plan.grouped_async_buffers.get());
         if (!queue->empty()) {
+          // when max queue length is reached, do not allocate new buffer
+          // but wait for queue head's fence instead
+          static size_t max_queue_length = 1;
+
           int reuse_mlvalue_index = queue->front();
-          queue->pop_front();
           OrtValue& reuse_value = GetMutableMLValue(reuse_mlvalue_index);
-          ORT_RETURN_IF_ERROR(AllocateMLValueTensorPreAllocateBuffer(
-              ort_value, reuse_mlvalue_index, ml_data_type, alloc_info, *shape));
-          ort_value.ShareFenceWith(reuse_value);
-        } else {
+          if (queue->size() == max_queue_length ||
+              reuse_value.Fence()->CanRelease()) {
+            queue->pop_front();
+            ORT_RETURN_IF_ERROR(AllocateMLValueTensorPreAllocateBuffer(
+                ort_value, reuse_mlvalue_index, ml_data_type, alloc_info, *shape));
+            ort_value.ShareFenceWith(reuse_value);
+            async_buffer_reused = true;
+          }
+        }
+        if (!async_buffer_reused) {
           // nothing to reuse from the queue, create a new buffer with a new fence
           ORT_RETURN_IF_ERROR(AllocateMLValueTensorSelfOwnBuffer(ort_value, ort_value_index, ml_data_type, alloc_info,
                                                                  *shape, /*create_fence*/ true));
