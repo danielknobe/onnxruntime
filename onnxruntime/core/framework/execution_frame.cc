@@ -346,8 +346,8 @@ Status ExecutionFrame::AllocateMLValueTensorPreAllocateBuffer(OrtValue& ort_valu
 
     // be generous and use the buffer if it's large enough. log a warning though as it indicates a bad model
     if (buffer_num_elements >= required_num_elements) {
-      // View Operator is reusing the buffer bigger than the required size.
-      // Disabling warning message for now. The op is in the process of being deprecated.
+// View Operator is reusing the buffer bigger than the required size.
+// Disabling warning message for now. The op is in the process of being deprecated.
 #ifndef ENABLE_TRAINING
       LOGS(session_state_.Logger(), WARNING) << message;
 #endif
@@ -463,6 +463,7 @@ Status ExecutionFrame::AllocateAsPerAllocationPlan(OrtValue& ort_value, int ort_
         OrtValue& reuse_value = GetMutableMLValue(reuse_mlvalue_index);
         if (!reuse_value.IsAllocated()) {
           ORT_RETURN_IF_ERROR(AllocateAsPerAllocationPlan(reuse_value, reuse_mlvalue_index, shape, nnz));
+          std::cout << "(" << ort_value_index << "): reused (alloc) " << reuse_mlvalue_index << std::endl;
         }
         ORT_RETURN_IF_ERROR(AllocateMLValueTensorPreAllocateBuffer(
             ort_value, reuse_mlvalue_index, ml_data_type, alloc_info, *shape, per_alloc_plan.create_fence));
@@ -476,22 +477,15 @@ Status ExecutionFrame::AllocateAsPerAllocationPlan(OrtValue& ort_value, int ort_
       }
       case AllocKind::kGroupAllocate: {
         // Async buffers with fence would be added to tail of its group queue
-        bool reuse_from_queue = false;
         auto* queue = FindQueueForGroupedAsyncBuffers(per_alloc_plan.grouped_async_buffers.get());
         if (!queue->empty()) {
           int reuse_mlvalue_index = queue->front();
+          queue->pop_front();
           OrtValue& reuse_value = GetMutableMLValue(reuse_mlvalue_index);
-          if (reuse_value.Fence()->CanRelease()) {
-            // if async exec on the head of the group queue has finished, reuse
-            queue->pop_front();
-            ORT_RETURN_IF_ERROR(AllocateMLValueTensorPreAllocateBuffer(
-                ort_value, reuse_mlvalue_index, ml_data_type, alloc_info, *shape));
-            ort_value.ShareFenceWith(reuse_value);
-            reuse_from_queue = true;
-          }
-        }
-
-        if (!reuse_from_queue) {
+          ORT_RETURN_IF_ERROR(AllocateMLValueTensorPreAllocateBuffer(
+              ort_value, reuse_mlvalue_index, ml_data_type, alloc_info, *shape));
+          ort_value.ShareFenceWith(reuse_value);
+        } else {
           // nothing to reuse from the queue, create a new buffer with a new fence
           ORT_RETURN_IF_ERROR(AllocateMLValueTensorSelfOwnBuffer(ort_value, ort_value_index, ml_data_type, alloc_info,
                                                                  *shape, /*create_fence*/ true));
@@ -533,12 +527,14 @@ Status ExecutionFrame::ReleaseMLValueImpl(int ort_value_idx) {
     const auto& alloc_plan = session_state_.GetExecutionPlan()->allocation_plan;
     ORT_ENFORCE(ort_value_idx >= 0 && static_cast<size_t>(ort_value_idx) < alloc_plan.size());
     const auto& per_alloc_plan = alloc_plan[ort_value_idx];
-    auto* queue = FindQueueForGroupedAsyncBuffers(per_alloc_plan.grouped_async_buffers.get());
-    // note it is possible for value to have fence but not in a group
-    if (queue != nullptr) {
+    if (per_alloc_plan.alloc_kind == AllocKind::kGroupAllocate) {
+      auto* queue = FindQueueForGroupedAsyncBuffers(per_alloc_plan.grouped_async_buffers.get());
       queue->push_back(ort_value_idx);
+    } else if (fence->CanRelease()) {
+      ORT_RETURN_IF_ERROR(IExecutionFrame::ReleaseMLValueImpl(ort_value_idx));
+    } else {
+      // keep the value in all_values_ until Session.run() end
     }
-    // keep the value in all_values_ until Session.run() end
   } else {
     ORT_RETURN_IF_ERROR(IExecutionFrame::ReleaseMLValueImpl(ort_value_idx));
   }

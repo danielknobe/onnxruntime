@@ -26,7 +26,9 @@ bool MemorySwapRewriter::ShouldHandleSrcNode(const Node& node) const {
   // blacklist some ops for memory swap
   // TODO: make it configurable
   static const std::unordered_set<std::string> ignore_src_op_types =
-      {"Shape"};
+      {"Shape",
+       "Reshape",
+       "Transpose"};
   return !IsBackwardNode(node) && 0 == ignore_src_op_types.count(node.OpType());
 }
 

@@ -331,7 +331,7 @@ class PlannerImpl {
 
   bool FindMatchingTensorInFreeList(
       const onnxruntime::NodeArg& output_arg,
-      std::function<bool(std::list<FreeBufferInfo>::const_iterator)> process_found) {
+      std::function<bool(std::list<FreeBufferInfo>::const_iterator, bool&)> process_found) {
     auto p_required_buffer_shape = context_.GetShape(output_arg);
     if (nullptr == p_required_buffer_shape) return false;
     auto& required_memory_info = AllocPlan(output_arg.Name()).location;
@@ -345,9 +345,12 @@ class PlannerImpl {
       if (nullptr != p_available_buffer_shape) {
         if (SameSize(*p_available_buffer_shape, *p_node_arg,
                      *p_required_buffer_shape, output_arg)) {
-          if (process_found(it)) {
-            freelist_.erase(it);
-            return true;
+          bool remove_from_freelist = false;
+          if (process_found(it, remove_from_freelist)) {
+            if (remove_from_freelist) {
+              freelist_.erase(it);
+            }
+            return true;  // stop searching
           }
         }
       }
@@ -357,17 +360,18 @@ class PlannerImpl {
 
   // Find if freelist contains a buffer of the same size as output_arg
   bool FindReusableTensor(const onnxruntime::NodeArg& output_arg, OrtValueIndex* reusable_tensor) {
-    // async buffer should not be reused here
-    // instead, it has its own group for reuse at runtime
+    // fenced buffer should not try to reuse from freelist here
+    // instead, it may have its own group for reuse at runtime
     if (HasFence(&output_arg)) return false;
 
     return FindMatchingTensorInFreeList(
         output_arg,
-        [&](std::list<FreeBufferInfo>::const_iterator it) {
+        [&](std::list<FreeBufferInfo>::const_iterator it, bool& remove_from_freelist) {
           if (!AllocPlan(it->ml_value).create_fence) {
             // only reuse non-async buffer from free list
             // since async buffer may still being used when in CPU's free list
             *reusable_tensor = it->ml_value;
+            remove_from_freelist = true;
             return true;
           }
           return false;
@@ -584,6 +588,7 @@ class PlannerImpl {
       SequentialExecutionPlan::NodeExecutionPlan step = execution_plan[program_counter];
       // the node (aka operator) which carries the considered program (aka computation).
       const auto* pnode = graph_viewer_.GetNode(step.node_index);
+
       // node outputs.
       const auto& output_defs = pnode->OutputDefs();
       // output_arg_def_index is the index of ArgDefs in pnode's output list.
@@ -640,11 +645,15 @@ class PlannerImpl {
           auto& grouped_buffers = AllocPlan(current).grouped_async_buffers;
           if (!FindMatchingTensorInFreeList(
                   *node_output,
-                  [&](std::list<FreeBufferInfo>::const_iterator it) {
+                  [&](std::list<FreeBufferInfo>::const_iterator it, bool& remove_from_freelist) {
                     auto& found_grouped_buffers = AllocPlan(it->ml_value).grouped_async_buffers;
                     if (found_grouped_buffers != nullptr) {
                       ORT_ENFORCE(grouped_buffers == nullptr);  // should have not been assigned yet
                       grouped_buffers = found_grouped_buffers;
+                      // Note: do not delete entry from freelist
+                      // since the grouped async buffers will go through ReleaseMLValue at runtime
+                      // for reusing dynamically
+                      remove_from_freelist = false;
                       return true;
                     }
                     return false;

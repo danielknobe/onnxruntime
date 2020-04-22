@@ -479,10 +479,25 @@ Status TrainingSession::AddMemorySwap(int min_topo_distance) {
   GraphViewer gv(graph);
   for (auto i : gv.GetNodesInTopologicalOrder()) {
     const auto& node = *gv.GetNode(i);
-    std::cout << node.OpType() << ": " << node.OutputDefs()[0]->Name()
-              << ", Output to {";
+    std::cout << node.Name() << ": " << node.OutputDefs()[0]->Name() << " [";
+    const auto* shape_proto = node.OutputDefs()[0]->Shape();
+    if (shape_proto) {
+      for (auto dim : shape_proto->dim()) {
+        if (dim.has_dim_value())
+          std::cout << dim.dim_value();
+        else if (dim.has_dim_param())
+          std::cout << dim.dim_param();
+        else
+          std::cout << "?";
+
+        std::cout << ",";
+      }
+    } else {
+      std::cout << "*";
+    }
+    std::cout << "], Output/control to {";
     for (auto out_iter = node.OutputNodesBegin(); out_iter != node.OutputNodesEnd(); ++out_iter) {
-      std::cout << out_iter->OpType() << ":" << out_iter->OutputDefs()[0]->Name() << ", ";
+      std::cout << out_iter->Name() << ":" << out_iter->OutputDefs()[0]->Name() << ", ";
     }
     std::cout << "}" << std::endl;
   }
